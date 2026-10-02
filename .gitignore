@@ -1,0 +1,7 @@
+node_modules/
+/config/local-*
+.type/
+*.tgz
+data/
+*.log
+.env

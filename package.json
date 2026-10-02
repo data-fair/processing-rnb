@@ -1,0 +1,57 @@
+{
+  "name": "@data-fair/processing-rnb",
+  "version": "0.1.0",
+  "description": "Load the french Référentiel National des Bâtiments (RNB) into a data-fair dataset and keep it in sync with the nightly diff.",
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "lint-fix": "eslint --fix .",
+    "prepare": "husky || true",
+    "build-types": "export NODE_OPTIONS='--experimental-strip-types' && df-build-types ./config && df-build-types ./types",
+    "test-base": "NODE_ENV=test node --experimental-strip-types --test-force-exit --test-concurrency=1 --test --test-reporter=spec --test-reporter-destination=stdout",
+    "test": "npm run test-base test-it/*.ts"
+  },
+  "imports": {
+    "#config": "./lib/config.ts",
+    "#types/*": "./types/*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/data-fair/processing-rnb.git"
+  },
+  "keywords": [
+    "data-fair-processings-plugin"
+  ],
+  "license": "AGPL-3.0-only",
+  "bugs": {
+    "url": "https://github.com/data-fair/processing-rnb/issues"
+  },
+  "homepage": "https://github.com/data-fair/processing-rnb#readme",
+  "dependencies": {
+    "csv-parse": "^5.6.0",
+    "csv-stringify": "^6.5.2",
+    "unzipper": "^0.12.3"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "@data-fair/lib-common-types": "^1.21.0",
+    "@data-fair/lib-processing-dev": "^0.3.0",
+    "@data-fair/lib-types-builder": "^1.14.0",
+    "@data-fair/lib-utils": "^1.11.0",
+    "@types/node": "^22.15.3",
+    "@types/unzipper": "^0.10.10",
+    "axios": "^1.7.9",
+    "config": "^4.4.1",
+    "eslint": "^9.26.0",
+    "husky": "^9.1.7",
+    "neostandard": "^0.12.1",
+    "typescript": "^5.8.3",
+    "ws": "^8.19.0"
+  },
+  "files": [
+    "processing-config-schema.json",
+    "./lib/**/*"
+  ]
+}
