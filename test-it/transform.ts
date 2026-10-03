@@ -9,6 +9,25 @@ import {
   exportRowToDatasetRow,
   sysPeriodToIso
 } from '../lib/transform.ts'
+import { GEOMETRY_CONCEPT, RNB_SCHEMA } from '../lib/schemas.ts'
+
+// data-fair indexes a single geo column: only one schema property may carry a geo concept.
+test('RNB_SCHEMA carries a single geo concept', () => {
+  const geoConcepts = [
+    'https://purl.org/geojson/vocab#geometry',
+    'http://data.ign.fr/def/geometrie#Geometry',
+    'http://www.w3.org/2003/01/geo/wgs84_pos#lat_long',
+    'http://schema.org/latitude',
+    'http://www.w3.org/2003/01/geo/wgs84_pos#lat',
+    'http://schema.org/longitude',
+    'http://www.w3.org/2003/01/geo/wgs84_pos#long',
+    'http://data.ign.fr/def/geometrie#coordX',
+    'http://data.ign.fr/def/geometrie#coordY'
+  ]
+  const geoColumns = RNB_SCHEMA.filter(p => p['x-refersTo'] && geoConcepts.includes(p['x-refersTo']))
+  assert.deepEqual(geoColumns.map(p => p.key), ['shape'])
+  assert.equal(RNB_SCHEMA.find(p => p.key === 'shape')?.['x-refersTo'], GEOMETRY_CONCEPT)
+})
 
 test('ewktPointToLatLon converts EWKT lon/lat to data-fair lat,lon', () => {
   assert.equal(

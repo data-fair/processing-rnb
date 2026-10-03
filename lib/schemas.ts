@@ -1,7 +1,8 @@
 import type { SchemaProperty } from './types.ts'
 
 export const GEOMETRY_CONCEPT = 'https://purl.org/geojson/vocab#geometry'
-export const LAT_LON_CONCEPT = 'http://www.w3.org/2003/01/geo/wgs84_pos#lat_long'
+export const RNB_ID_CONCEPT = 'https://rnb.gouv.fr/#ID-RNB'
+export const DATE_CONCEPT = 'http://schema.org/Date'
 
 /** Columns of the produced dataset, in the order they are written to the bulk CSV. */
 export const RNB_COLUMNS = [
@@ -30,6 +31,7 @@ export const RNB_SCHEMA: SchemaProperty[] = [
     title: 'ID-RNB',
     description: 'Identifiant unique et pérenne du bâtiment dans le RNB.',
     type: 'string',
+    'x-refersTo': RNB_ID_CONCEPT,
     ignoreDetection: true
   },
   {
@@ -37,7 +39,7 @@ export const RNB_SCHEMA: SchemaProperty[] = [
     title: 'Point',
     description: 'Localisation du bâtiment en WGS84, au format « latitude,longitude ».',
     type: 'string',
-    'x-refersTo': LAT_LON_CONCEPT,
+    ignoreDetection: true,
     'x-capabilities': { textAgg: false }
   },
   {
@@ -86,6 +88,7 @@ export const RNB_SCHEMA: SchemaProperty[] = [
     title: 'Date de modification',
     description: 'Date de la dernière modification du bâtiment connue du RNB.',
     type: 'string',
-    format: 'date-time'
+    format: 'date-time',
+    'x-refersTo': DATE_CONCEPT
   }
 ]
