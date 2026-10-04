@@ -59,7 +59,7 @@ export const pushRows = async (
     headers: { 'content-type': 'text/csv+gzip' },
     maxContentLength: Infinity,
     maxBodyLength: Infinity
-  }), log)).data ?? {}
+  }), log, true)).data ?? {}
   if (result.nbErrors) {
     // a batch with rejected lines leaves the dataset incomplete: fail and let the run resume later
     await log.error(`${result.nbErrors} lignes rejetées par data-fair`, result.errors?.[0])
@@ -75,5 +75,5 @@ export const patchExtras = async (
   log: LogFunctions
 ): Promise<void> => {
   dataset.extras = { ...dataset.extras, ...extras }
-  await dfRetry(() => axios.patch(`api/v1/datasets/${dataset.id}`, { extras: dataset.extras }), log)
+  await dfRetry(() => axios.patch(`api/v1/datasets/${dataset.id}`, { extras: dataset.extras }), log, true)
 }

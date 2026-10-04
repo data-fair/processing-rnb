@@ -23,32 +23,49 @@ export const resetStop = () => { shouldBeStopped = false }
 export const requestStop = () => { shouldBeStopped = true }
 export const isStopped = () => shouldBeStopped
 
-type Retry429Opts = { log?: Pick<LogFunctions, 'warning'>, retries?: number, delayMs?: number, source?: string }
+type Retry429Opts = { log?: Pick<LogFunctions, 'warning'>, retries?: number, delayMs?: number, source?: string, transient?: boolean }
+
+// Transport-level failures that a retry can recover from. Only used for idempotent writes (see dfRetry).
+const TRANSIENT_CODES = new Set(['ECONNRESET', 'ECONNABORTED', 'EPIPE', 'ETIMEDOUT', 'ERR_BAD_RESPONSE', 'ERR_NETWORK'])
+
+const isTransient = (err: any): boolean => {
+  const status = err?.status ?? err?.response?.status
+  if (typeof status === 'number' && status >= 500 && status < 600) return true
+  if (typeof err?.code === 'string' && TRANSIENT_CODES.has(err.code)) return true
+  return /stream has been aborted|socket hang up|aborted/i.test(err?.message ?? '')
+}
 
 /**
  * Run an async call, retrying on HTTP 429 (Too Many Requests): data-fair rate-limits bursts, so we
- * pause and retry rather than failing the whole run. Only 429 is retried, other errors are
- * rethrown. `fn` is a thunk so the request is rebuilt on each attempt.
+ * pause and retry rather than failing the whole run. With `transient` (idempotent writes only) it
+ * also retries network aborts (e.g. axios "stream has been aborted" when data-fair drops the
+ * `_bulk_lines` response) and 5xx. `fn` is a thunk so the request is rebuilt on each attempt.
  */
 export const withRetry429 = async <T>(fn: () => Promise<T>, opts: Retry429Opts = {}): Promise<T> => {
-  const { log, retries = 3, delayMs = 10000, source = 'Data-Fair' } = opts
+  const { log, retries = 3, delayMs = 10000, source = 'Data-Fair', transient = false } = opts
   let attempt = 0
   while (true) {
     try {
       return await fn()
     } catch (err: any) {
       const status = err?.status ?? err?.response?.status
-      if (status !== 429 || attempt >= retries) throw err
+      const retryable = status === 429 || (transient && isTransient(err))
+      if (!retryable || attempt >= retries) throw err
       attempt++
-      if (log) await log.warning(`429 reçu de ${source} — pause ${delayMs / 1000}s avant nouvelle tentative (${attempt}/${retries})`)
+      const reason = status === 429 ? `429 reçu de ${source}` : `erreur réseau vers ${source}`
+      if (log) await log.warning(`${reason} — pause ${delayMs / 1000}s avant nouvelle tentative (${attempt}/${retries})`)
       await new Promise(resolve => setTimeout(resolve, delayMs))
     }
   }
 }
 
-/** Run a data-fair write call with the 429 retry (the worker never retries POST/PATCH). */
-export const dfRetry = <T>(fn: () => Promise<T>, log?: Pick<LogFunctions, 'warning'>): Promise<T> =>
-  withRetry429(fn, { log })
+/**
+ * Run a data-fair write call with the retry (the worker never retries POST/PATCH).
+ * `transient` must stay false for non-idempotent calls (dataset creation): a network abort after
+ * the server applied the request would duplicate it.
+ */
+export const dfRetry = <T>(fn: () => Promise<T>, log?: Pick<LogFunctions, 'warning'>, transient = false): Promise<T> =>
+  withRetry429(fn, { log, transient })
 
 /** Axios hides the reason given by data-fair inside response.data; JSON.stringify(err) drops it. */
 export const describeError = (err: any): string => {

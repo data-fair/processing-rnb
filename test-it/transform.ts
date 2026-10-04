@@ -5,10 +5,10 @@ import {
   addressesToIds,
   diffRowToDatasetRow,
   ewktPointToLatLon,
-  ewktToWkt,
   exportRowToDatasetRow,
   sysPeriodToIso
 } from '../lib/transform.ts'
+import { shapeToWkt } from '../lib/geometry.ts'
 import { GEOMETRY_CONCEPT, RNB_SCHEMA } from '../lib/schemas.ts'
 
 // data-fair indexes a single geo column: only one schema property may carry a geo concept.
@@ -29,20 +29,32 @@ test('RNB_SCHEMA carries a single geo concept', () => {
   assert.equal(RNB_SCHEMA.find(p => p.key === 'shape')?.['x-refersTo'], GEOMETRY_CONCEPT)
 })
 
-test('ewktPointToLatLon converts EWKT lon/lat to data-fair lat,lon', () => {
+test('ewktPointToLatLon converts EWKT lon/lat to data-fair lat,lon, rounded to 6 decimals', () => {
   assert.equal(
     ewktPointToLatLon('SRID=4326;POINT(4.033645854904865 49.42990814620328)'),
-    '49.42990814620328,4.033645854904865'
+    '49.429908,4.033646'
   )
-  assert.equal(ewktPointToLatLon('SRID=4326;POINT(-4.116734211997037 48.00815045515884)'), '48.00815045515884,-4.116734211997037')
+  assert.equal(ewktPointToLatLon('SRID=4326;POINT(-4.116734211997037 48.00815045515884)'), '48.00815,-4.116734')
   assert.equal(ewktPointToLatLon(''), '')
   assert.equal(ewktPointToLatLon('garbage'), '')
 })
 
-test('ewktToWkt strips the SRID prefix', () => {
-  assert.equal(ewktToWkt('SRID=4326;MULTIPOLYGON(((4.03 49.42)))'), 'MULTIPOLYGON(((4.03 49.42)))')
-  assert.equal(ewktToWkt('POINT(1 2)'), 'POINT(1 2)')
-  assert.equal(ewktToWkt(''), '')
+test('shapeToWkt rounds coordinates and normalizes a valid polygon', () => {
+  assert.equal(
+    shapeToWkt('SRID=4326;MULTIPOLYGON(((4.031234567891 49.421234567891,4.04 49.42,4.04 49.43,4.03 49.43,4.031234567891 49.421234567891)))'),
+    'POLYGON ((4.031235 49.421235, 4.04 49.42, 4.04 49.43, 4.03 49.43, 4.031235 49.421235))'
+  )
+  assert.equal(shapeToWkt('SRID=4326;POINT(4.033645854904865 49.42990814620328)'), 'POINT (4.033646 49.429908)')
+  assert.equal(shapeToWkt(''), '')
+  assert.equal(shapeToWkt('SRID=4326;MULTIPOLYGON(((4.03 49.42)))'), '')
+})
+
+// RNB building 348ZZBX2HQ32: kinked ring that ES refuses to tessellate and that data-fair's own
+// @turf/unkink-polygon fallback leaves untouched. Rounding collapses this one; the output must be
+// a simple (non self-intersecting) polygon.
+test('shapeToWkt makes a kinked RNB polygon ES-indexable', () => {
+  const kinked = 'SRID=4326;MULTIPOLYGON(((4.893202211385481 47.18635083919363,4.893181499759598 47.18636288480153,4.893125788678635 47.186318768600586,4.893087132435354 47.18634641670887,4.893140076480027 47.186386976006055,4.893202211385481 47.18635083919363)))'
+  assert.equal(shapeToWkt(kinked), 'POLYGON ((4.893202 47.186351, 4.893181 47.186363, 4.893126 47.186319, 4.893087 47.186346, 4.89314 47.186387, 4.893202 47.186351))')
 })
 
 test('addressesToIds keeps only the BAN ids', () => {
@@ -71,7 +83,7 @@ test('exportRowToDatasetRow builds a full row from the national export', () => {
   const row = exportRowToDatasetRow({
     rnb_id: 'ZPAXN7C4DPJE',
     point: 'SRID=4326;POINT(4.033645854904865 49.42990814620328)',
-    shape: 'SRID=4326;MULTIPOLYGON(((4.03 49.42)))',
+    shape: 'SRID=4326;MULTIPOLYGON(((4.03 49.42,4.04 49.42,4.04 49.43,4.03 49.43,4.03 49.42)))',
     status: 'constructed',
     ext_ids: '[{"id": "bdnb-bc-JQP9-7Y45-2XUR", "source": "bdnb"}]',
     addresses: '[{"id": "025410000B0348", "bdg_cover_ratio": 0.05}]',
@@ -81,8 +93,8 @@ test('exportRowToDatasetRow builds a full row from the national export', () => {
   assert.deepEqual(row, {
     _action: 'createOrUpdate',
     rnb_id: 'ZPAXN7C4DPJE',
-    point: '49.42990814620328,4.033645854904865',
-    shape: 'MULTIPOLYGON(((4.03 49.42)))',
+    point: '49.429908,4.033646',
+    shape: 'POLYGON ((4.03 49.42, 4.04 49.42, 4.04 49.43, 4.03 49.43, 4.03 49.42))',
     status: 'constructed',
     ext_ids: '[{"id": "bdnb-bc-JQP9-7Y45-2XUR", "source": "bdnb"}]',
     addresses_id: '["025410000B0348"]',
@@ -98,15 +110,15 @@ test('diffRowToDatasetRow maps create/update and delete rows', () => {
     status: 'constructed',
     sys_period: '["2026-09-28 06:14:11.31343+00",)',
     point: 'SRID=4326;POINT(-4.116734211997037 48.00815045515884)',
-    shape: 'SRID=4326;MULTIPOLYGON(((-4.11 48.00)))',
+    shape: 'SRID=4326;MULTIPOLYGON(((-4.11 48.00,-4.1 48.00,-4.1 48.01,-4.11 48.01,-4.11 48.00)))',
     addresses_id: '["29232_3760_00004"]',
     ext_ids: '[]',
     validated_by: '[]'
   }), {
     _action: 'createOrUpdate',
     rnb_id: 'Y3AQWE8M2VV2',
-    point: '48.00815045515884,-4.116734211997037',
-    shape: 'MULTIPOLYGON(((-4.11 48.00)))',
+    point: '48.00815,-4.116734',
+    shape: 'POLYGON ((-4.11 48, -4.1 48, -4.1 48.01, -4.11 48.01, -4.11 48))',
     status: 'constructed',
     ext_ids: '[]',
     addresses_id: '["29232_3760_00004"]',

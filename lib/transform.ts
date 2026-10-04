@@ -1,18 +1,17 @@
 import type { RnbColumn } from './schemas.ts'
+import { shapeToWkt, COORD_DECIMALS } from './geometry.ts'
 
 export type BulkAction = 'createOrUpdate' | 'delete'
 export type DatasetRow = Partial<Record<RnbColumn, string>> & { _action: BulkAction, rnb_id: string }
 
-const SRID_RE = /^SRID=\d+;/
+const POINT_FACTOR = 10 ** COORD_DECIMALS
+const round = (value: string): string => String(Math.round(Number(value) * POINT_FACTOR) / POINT_FACTOR)
 
-/** Remove the `SRID=4326;` prefix of an EWKT string, keeping a plain WKT consumed by data-fair. */
-export const ewktToWkt = (value: string): string => (value || '').replace(SRID_RE, '')
-
-/** `SRID=4326;POINT(lon lat)` → `"lat,lon"`, the format data-fair reads for a geopoint. */
+/** `SRID=4326;POINT(lon lat)` → `"lat,lon"` rounded, the format data-fair reads for a geopoint. */
 export const ewktPointToLatLon = (value: string): string => {
   const match = /POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i.exec(value || '')
   if (!match) return ''
-  return `${match[2]},${match[1]}`
+  return `${round(match[2])},${round(match[1])}`
 }
 
 /** Export `addresses` column (full JSON objects) → JSON array of BAN address ids. */
@@ -54,7 +53,7 @@ export const exportRowToDatasetRow = (row: Record<string, string>): DatasetRow =
   _action: 'createOrUpdate',
   rnb_id: row.rnb_id || '',
   point: ewktPointToLatLon(row.point || ''),
-  shape: ewktToWkt(row.shape || ''),
+  shape: shapeToWkt(row.shape || ''),
   status: row.status || '',
   ext_ids: row.ext_ids || '',
   addresses_id: addressesToIds(row.addresses || ''),
@@ -72,7 +71,7 @@ export const diffRowToDatasetRow = (row: Record<string, string>): DatasetRow | n
     _action: 'createOrUpdate',
     rnb_id: row.rnb_id || '',
     point: ewktPointToLatLon(row.point || ''),
-    shape: ewktToWkt(row.shape || ''),
+    shape: shapeToWkt(row.shape || ''),
     status: row.status || '',
     ext_ids: row.ext_ids || '',
     addresses_id: row.addresses_id || '[]',
