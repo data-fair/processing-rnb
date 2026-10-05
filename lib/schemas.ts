@@ -21,6 +21,9 @@ export type RnbColumn = typeof RNB_COLUMNS[number]
 /** Columns of a `_bulk_lines` payload: the operation, then every dataset column. */
 export const BULK_COLUMNS: string[] = ['_action', ...RNB_COLUMNS]
 
+/** Repair payloads only patch the geometry: the other columns are left untouched. */
+export const PATCH_COLUMNS: string[] = ['_action', 'rnb_id', 'shape']
+
 /**
  * Schema of the produced dataset. Text indexing is disabled on every raw JSON column: they are
  * machine values, indexing them would only inflate the Elasticsearch index.

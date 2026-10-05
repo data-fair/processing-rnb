@@ -40,19 +40,22 @@ export const getDataset = async (axios: AxiosInstance, id: string): Promise<RnbD
 }
 
 /**
- * Push a batch of rows through `_bulk_lines`. Each row carries its `_action` (`createOrUpdate` or
- * `delete`), the primary key drives the match. `drop` replaces every existing line: it is only used
- * on the first batch of a restarted full import, to clear a partial load.
+ * Push a batch of rows through `_bulk_lines`. Each row carries its `_action` (`createOrUpdate`,
+ * `patch` or `delete`), the primary key drives the match. `drop` replaces every existing line: it is
+ * only used on the first batch of a restarted full import, to clear a partial load. `columns`
+ * narrows the CSV so a `patch` does not overwrite the other columns with empty values. With
+ * `allowMissing`, a patch targeting a line absent from the dataset (a building added since the
+ * export) is reported as a warning instead of failing the run.
  */
 export const pushRows = async (
   axios: AxiosInstance,
   datasetId: string,
   rows: DatasetRow[],
   log: LogFunctions,
-  options: { drop?: boolean } = {}
+  options: { drop?: boolean, columns?: string[], allowMissing?: boolean } = {}
 ): Promise<void> => {
   if (!rows.length) return
-  const csv = stringify(rows, { header: true, columns: BULK_COLUMNS })
+  const csv = stringify(rows, { header: true, columns: options.columns ?? BULK_COLUMNS })
   const body = gzipSync(csv)
   const url = `api/v1/datasets/${datasetId}/_bulk_lines${options.drop ? '?drop=true' : ''}`
   const result = (await dfRetry(() => axios.post(url, body, {
@@ -61,8 +64,13 @@ export const pushRows = async (
     maxBodyLength: Infinity
   }), log, true)).data ?? {}
   if (result.nbErrors) {
+    const errors: any[] = result.errors ?? []
+    if (options.allowMissing && errors.length === result.nbErrors && errors.every(err => err.status === 404)) {
+      await log.warning(`${result.nbErrors} ligne(s) absente(s) du jeu de données, patch ignoré`, errors[0])
+      return
+    }
     // a batch with rejected lines leaves the dataset incomplete: fail and let the run resume later
-    await log.error(`${result.nbErrors} lignes rejetées par data-fair`, result.errors?.[0])
+    await log.error(`${result.nbErrors} lignes rejetées par data-fair`, errors[0])
     throw new Error(`${result.nbErrors} lignes rejetées par data-fair`)
   }
 }

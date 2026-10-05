@@ -8,8 +8,8 @@ import type { ProcessingConfig } from '#types/processingConfig/index.ts'
 const prepare: PrepareFunction<ProcessingConfig> = async ({ processingConfig, secrets }) => {
   if (processingConfig.datasetMode === 'create') {
     if (!processingConfig.datasetTitle) throw new Error('Titre du jeu de données à créer manquant.')
-  } else if (processingConfig.datasetMode === 'update') {
-    if (!processingConfig.dataset?.id) throw new Error('Jeu de données à mettre à jour manquant.')
+  } else if (processingConfig.datasetMode === 'update' || processingConfig.datasetMode === 'repair') {
+    if (!processingConfig.dataset?.id) throw new Error('Jeu de données manquant.')
   } else {
     throw new Error(`Action inconnue : "${processingConfig.datasetMode}".`)
   }

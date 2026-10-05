@@ -1,7 +1,7 @@
 import type { RnbColumn } from './schemas.ts'
 import { shapeToWkt, COORD_DECIMALS } from './geometry.ts'
 
-export type BulkAction = 'createOrUpdate' | 'delete'
+export type BulkAction = 'createOrUpdate' | 'patch' | 'delete'
 export type DatasetRow = Partial<Record<RnbColumn, string>> & { _action: BulkAction, rnb_id: string }
 
 const POINT_FACTOR = 10 ** COORD_DECIMALS

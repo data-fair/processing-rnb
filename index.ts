@@ -12,7 +12,8 @@ export const prepare: PrepareFunction<ProcessingConfig> = async (context) => {
 
 /**
  * Execute the processing (triggered when the processing is started).
- * First run imports the full national export, following runs apply the nightly diff.
+ * The first create run imports the full national export, update runs apply the nightly diff and
+ * repair runs rewrite only the geometries a previous version of the pipeline could not index.
  */
 export const run: RunFunction<ProcessingConfig> = async (context) => {
   const { run } = await import('./lib/run.ts')

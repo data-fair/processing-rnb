@@ -66,6 +66,41 @@
               }
             }
           }
+        },
+        {
+          "title": "Repair a dataset — targeted national import",
+          "x-i18n-title": { "fr": "Réparer un jeu de données — correction ciblée des géométries" },
+          "required": ["dataset"],
+          "properties": {
+            "datasetMode": {
+              "type": "string",
+              "const": "repair",
+              "title": "Action",
+              "x-i18n-title": { "fr": "Action" }
+            },
+            "dataset": {
+              "type": "object",
+              "title": "Dataset",
+              "x-i18n-title": { "fr": "Jeu de données" },
+              "description": "Dataset to repair. The national export is re-streamed and only the `shape` of buildings whose geometry the current algorithm changes is rewritten, so the dataset is repaired in place (no `drop`, no full reload).",
+              "x-i18n-description": {
+                "fr": "Jeu de données à réparer. L'export national est réanalysé et seule la colonne `shape` des bâtiments dont la géométrie est modifiée par l'algorithme actuel est réécrite : le jeu est réparé sur place (sans `drop` ni rechargement complet)."
+              },
+              "layout": {
+                "getItems": {
+                  "url": "${context.dataFairUrl}/api/v1/datasets?select=id,title&size=50&${context.ownerFilter}&raw=true",
+                  "qSearchParam": "q",
+                  "itemsResults": "data.results",
+                  "itemTitle": "item.title",
+                  "itemKey": "item.id"
+                }
+              },
+              "properties": {
+                "id": { "type": "string", "title": "Identifiant" },
+                "title": { "type": "string", "title": "Titre" }
+              }
+            }
+          }
         }
       ]
     },
@@ -89,9 +124,9 @@
           "title": "National export URL",
           "x-i18n-title": { "fr": "URL de l'export national" },
           "default": "https://rnb-opendata.s3.fr-par.scw.cloud/files/RNB_nat.csv.zip",
-          "description": "ZIP archive of the national RNB export, as published on [data.gouv.fr](https://www.data.gouv.fr/fr/datasets/referentiel-national-des-batiments/). Only used by the full import (create mode).",
+          "description": "ZIP archive of the national RNB export, as published on [data.gouv.fr](https://www.data.gouv.fr/fr/datasets/referentiel-national-des-batiments/). Used by the full import (create mode) and by the repair mode.",
           "x-i18n-description": {
-            "fr": "Archive ZIP de l'export national RNB, publiée sur [data.gouv.fr](https://www.data.gouv.fr/fr/datasets/referentiel-national-des-batiments/). Utilisée uniquement par l'import complet (mode création)."
+            "fr": "Archive ZIP de l'export national RNB, publiée sur [data.gouv.fr](https://www.data.gouv.fr/fr/datasets/referentiel-national-des-batiments/). Utilisée par l'import complet (mode création) et par le mode réparation."
           }
         }
       }
