@@ -1,6 +1,6 @@
 {
   "name": "@data-fair/processing-rnb",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Load the french Référentiel National des Bâtiments (RNB) into a data-fair dataset and keep it in sync with the nightly diff.",
   "main": "index.ts",
   "type": "module",
