@@ -10,7 +10,7 @@ Charger le [Référentiel National des Bâtiments](https://rnb.beta.gouv.fr/) (R
 
 Colonnes produites : `rnb_id`, `point`, `shape`, `status`, `ext_ids`, `addresses_id`, `validated_by`, `modified_at`.
 
-Les contours sont arrondis à 6 décimales puis validés (sommets dupliqués, auto-intersections) et réparés par `polygon-clipping` avant indexation, afin qu'Elasticsearch n'ait jamais à rejeter une ligne pour une géométrie invalide.
+Les contours sont arrondis à 6 décimales puis validés (sommets dupliqués, auto-intersections) et réparés par `polygon-clipping` avant indexation, afin qu'Elasticsearch n'ait jamais à rejeter une ligne pour une géométrie invalide. Les anneaux dégénérés ou négligeables et les trous sortis de leur coque sont supprimés ; en mode réparation, les lignes dont la `shape` stockée (non arrondie, des premières versions) n'est pas indexable telle quelle sont réécrites.
 
 Si un import complet est interrompu, le prochain lancement le reprend automatiquement (les lignes partielles sont remplacées).
 

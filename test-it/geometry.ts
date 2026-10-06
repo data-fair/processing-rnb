@@ -13,10 +13,12 @@ test('shapeToWkt repairs RNB ASKDP3ZF62M3 (duplicate vertex after rounding)', ()
 
 // Real RNB building 38H384R45P5A (Manziat). The national export carried 46.3597725 for one vertex,
 // which rounds to the same 4.907562,46.359772 as another: ES rejected the line at that point.
+// polygon-clipping splits the figure-eight, and the 0.05 m² sliver it leaves is dropped: ES'
+// tessellator has no use for it.
 test('shapeToWkt repairs RNB 38H384R45P5A (duplicate vertex after rounding)', () => {
   const result = shapeToWktDetailed('MULTIPOLYGON(((4.907496 46.359593,4.907392 46.359608,4.907422 46.359706,4.907446 46.35979,4.907562 46.359772,4.907575 46.359771,4.907575 46.35977,4.907562 46.359772,4.907511 46.359591,4.907496 46.359593)))')
   assert.equal(result.repaired, true)
-  assert.equal(result.wkt, 'MULTIPOLYGON (((4.907392 46.359608, 4.907496 46.359593, 4.907511 46.359591, 4.907562 46.359772, 4.907446 46.35979, 4.907422 46.359706, 4.907392 46.359608)), ((4.907562 46.359772, 4.907575 46.35977, 4.907575 46.359771, 4.907562 46.359772)))')
+  assert.equal(result.wkt, 'POLYGON ((4.907392 46.359608, 4.907496 46.359593, 4.907511 46.359591, 4.907562 46.359772, 4.907446 46.35979, 4.907422 46.359706, 4.907392 46.359608))')
 })
 
 // A valid RNB polygon must pass through untouched, so a repair run only patches broken lines.
@@ -36,4 +38,38 @@ test('shapeToWkt drops a degenerate two-point ring', () => {
     { wkt: '', repaired: true }
   )
   assert.equal(shapeToWkt('POLYGON((3.86 49.86,3.861 49.861,3.86 49.86,3.861 49.861,3.86 49.86))'), '')
+})
+
+// The raw shape stored by the first releases of the plugin is not closed. The rounded output is
+// valid, but `repaired` must still be true: the repair pass has to rewrite the stored shape.
+test('shapeToWktDetailed flags an unclosed raw ring as repaired', () => {
+  assert.deepEqual(shapeToWktDetailed('POLYGON((0 0,1 0,1 1,0 1))'), {
+    wkt: 'POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))',
+    repaired: true
+  })
+})
+
+// A degenerate part next to a valid one: "at least 4 polygon points required" on the stored shape,
+// while the rounded geometry keeps only the valid part.
+test('shapeToWktDetailed drops a degenerate multipolygon part and flags the line', () => {
+  assert.deepEqual(shapeToWktDetailed('MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0)),((2 2,2 2,2 2,2 2)))'), {
+    wkt: 'POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))',
+    repaired: true
+  })
+})
+
+// A hole outside its shell makes ES reject the line ("illegal hole"): it is dropped.
+test('shapeToWktDetailed drops a hole that escapes its shell', () => {
+  assert.deepEqual(shapeToWktDetailed('POLYGON((0 0,10 0,10 10,0 10,0 0),(20 20,21 20,21 21,20 20))'), {
+    wkt: 'POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))',
+    repaired: true
+  })
+})
+
+// A hole inside its shell is preserved.
+test('shapeToWktDetailed keeps a valid hole', () => {
+  assert.deepEqual(shapeToWktDetailed('POLYGON((0 0,10 0,10 10,0 10,0 0),(2 2,2 3,3 3,3 2,2 2))'), {
+    wkt: 'POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (2 2, 2 3, 3 3, 3 2, 2 2))',
+    repaired: false
+  })
 })

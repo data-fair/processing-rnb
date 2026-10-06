@@ -45,7 +45,7 @@ export const getDataset = async (axios: AxiosInstance, id: string): Promise<RnbD
  * only used on the first batch of a restarted full import, to clear a partial load. `columns`
  * narrows the CSV so a `patch` does not overwrite the other columns with empty values. With
  * `allowMissing`, a patch targeting a line absent from the dataset (a building added since the
- * export) is reported as a warning instead of failing the run.
+ * export) is reported as a warning instead of failing the run, and returned in the missing count.
  */
 export const pushRows = async (
   axios: AxiosInstance,
@@ -53,8 +53,8 @@ export const pushRows = async (
   rows: DatasetRow[],
   log: LogFunctions,
   options: { drop?: boolean, columns?: string[], allowMissing?: boolean } = {}
-): Promise<void> => {
-  if (!rows.length) return
+): Promise<number> => {
+  if (!rows.length) return 0
   const csv = stringify(rows, { header: true, columns: options.columns ?? BULK_COLUMNS })
   const body = gzipSync(csv)
   const url = `api/v1/datasets/${datasetId}/_bulk_lines${options.drop ? '?drop=true' : ''}`
@@ -67,12 +67,13 @@ export const pushRows = async (
     const errors: any[] = result.errors ?? []
     if (options.allowMissing && errors.length === result.nbErrors && errors.every(err => err.status === 404)) {
       await log.warning(`${result.nbErrors} ligne(s) absente(s) du jeu de données, patch ignoré`, errors[0])
-      return
+      return result.nbErrors
     }
     // a batch with rejected lines leaves the dataset incomplete: fail and let the run resume later
     await log.error(`${result.nbErrors} lignes rejetées par data-fair`, errors[0])
     throw new Error(`${result.nbErrors} lignes rejetées par data-fair`)
   }
+  return 0
 }
 
 /** Merge extras into the dataset and persist them (sync state lives here, not in the config). */

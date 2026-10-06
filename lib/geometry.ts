@@ -40,9 +40,46 @@ const cleanRing = (ring: Position[]): Position[] | null => {
   return out.length >= 4 ? out : null
 }
 
+// A ring whose absolute area is below this (~0.1 m²) is noise: rounding kinks and the
+// polygon-clipping split manufacture such slivers (RNB 38H384R45P5A ends up as an 11 cm wide
+// triangle), and the ES tessellator is needlessly fragile on them.
+const MIN_RING_AREA = 1e-11
+
+/** Shoelace signed area of a closed ring. */
+const ringArea = (ring: Position[]): number => {
+  let area = 0
+  for (let i = 0; i < ring.length - 1; i++) {
+    area += cross(ring[i][0], ring[i][1], ring[i + 1][0], ring[i + 1][1])
+  }
+  return area / 2
+}
+
+/** Ray casting: is `point` inside `ring`? ES drops the whole line when a hole escapes its shell. */
+const pointInRing = (point: Position, ring: Position[]): boolean => {
+  let inside = false
+  for (let i = 0, j = ring.length - 2; i < ring.length - 1; j = i++) {
+    if ((ring[i][1] > point[1]) !== (ring[j][1] > point[1]) &&
+      point[0] < ((ring[j][0] - ring[i][0]) * (point[1] - ring[i][1])) / (ring[j][1] - ring[i][1]) + ring[i][0]) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+/**
+ * Clean a polygon: the first ring is the shell (the whole polygon is dropped when degenerate), the
+ * following ones are holes. Holes that collapsed, are negligible or escape the shell are dropped:
+ * ES refuses our ring as an "illegal hole" and rejects the whole line with it.
+ */
 const cleanPolygon = (coordinates: Position[][]): Position[][] | null => {
-  const rings = coordinates.map(cleanRing).filter((ring): ring is Position[] => ring !== null)
-  return rings.length ? rings : null
+  const shell = cleanRing(coordinates[0] ?? [])
+  if (!shell || Math.abs(ringArea(shell)) < MIN_RING_AREA) return null
+  const rings = [shell]
+  for (const hole of coordinates.slice(1)) {
+    const cleaned = cleanRing(hole)
+    if (cleaned && Math.abs(ringArea(cleaned)) >= MIN_RING_AREA && pointInRing(cleaned[0], shell)) rings.push(cleaned)
+  }
+  return rings
 }
 
 /** Remove rings/polygons a rounding pass may have collapsed; null when nothing valid is left. */
@@ -174,6 +211,34 @@ const exactGeometryInvalid = (geometry: Geometry): boolean => {
 const geometryNeedsRepair = (geometry: Geometry): boolean =>
   countPoints(geometry) > EXACT_CHECK_MAX_POINTS || exactGeometryInvalid(geometry)
 
+/** Already closed, ≥ 4 points, no duplicate and not negligible: cleaning it would change it. */
+const ringIsAcceptable = (ring: Position[]): boolean => {
+  const cleaned = cleanRing(ring)
+  return cleaned !== null && cleaned.length === ring.length && Math.abs(ringArea(cleaned)) >= MIN_RING_AREA
+}
+
+/**
+ * Would Elasticsearch accept the shape exactly as the export wrote it? The first releases of this
+ * plugin stored the raw WKT verbatim, so a line's stored shape may be unclosed, degenerate,
+ * self-intersecting or carry an escaped hole even when our rounded output is valid (rounding heals
+ * some kinks). The repair pass must rewrite those lines too: `repaired` is true for them as well.
+ */
+const rawGeometryEsSafe = (geometry: Geometry): boolean => {
+  if (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon') return true
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates
+  let points = 0
+  for (const polygon of polygons) {
+    if (!polygon.length || !ringIsAcceptable(polygon[0])) return false
+    points += polygon[0].length
+    for (const hole of polygon.slice(1)) {
+      if (!ringIsAcceptable(hole) || !pointInRing(hole[0], polygon[0])) return false
+      points += hole.length
+    }
+  }
+  if (points > EXACT_CHECK_MAX_POINTS) return false // play safe: rewrite the rare huge shapes
+  return !exactGeometryInvalid(geometry)
+}
+
 /**
  * Resolve self-intersections the way ES' tessellator cannot. `union(polygon, polygon)` is the JS
  * equivalent of GEOS `buffer(0)`: it splits a kinked ring into valid polygons. This is stronger
@@ -201,9 +266,10 @@ export interface ShapeResult {
 }
 
 /**
- * EWKT/WKT → rounded, ES-indexable WKT. `repaired` is true when the source geometry needed the
- * cleaning/union pass, so the repair processing can find the lines stored by a previous version of
- * this pipeline without reading the dataset back.
+ * EWKT/WKT → rounded, ES-indexable WKT. `repaired` is true when the stored shape is not the
+ * geometry the current pipeline would write (raw kink, self-intersection, degenerate ring, hole
+ * escaped from its shell, parse error), so the repair processing can find the lines stored by a
+ * previous version of this pipeline without reading the dataset back.
  */
 export const shapeToWktDetailed = (value: string): ShapeResult => {
   const wkt = (value || '').replace(SRID_RE, '')
@@ -211,12 +277,13 @@ export const shapeToWktDetailed = (value: string): ShapeResult => {
   try {
     const geometry = wktToGeoJSON(wkt) as Geometry
     if (!geometry?.type || !geometry.coordinates) return { wkt: '', repaired: true }
+    const rawUnsafe = !rawGeometryEsSafe(geometry)
     if (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon') {
-      return { wkt: geojsonToWKT(roundGeometry(geometry) as any), repaired: false }
+      return { wkt: geojsonToWKT(roundGeometry(geometry) as any), repaired: rawUnsafe }
     }
     const cleaned = cleanGeometry(roundGeometry(geometry))
     if (!cleaned) return { wkt: '', repaired: true }
-    if (!geometryNeedsRepair(cleaned)) return { wkt: geojsonToWKT(cleaned as any), repaired: false }
+    if (!geometryNeedsRepair(cleaned)) return { wkt: geojsonToWKT(cleaned as any), repaired: rawUnsafe }
     const repaired = makeValid(cleaned)
     if (!repaired) return { wkt: '', repaired: true }
     const final = cleanGeometry(roundGeometry(repaired))
