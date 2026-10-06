@@ -103,6 +103,18 @@ test('exportRowToDatasetRow builds a full row from the national export', () => {
   })
 })
 
+// An irreparable contour must not leave the line without any geometry: data-fair would skip its
+// geo column and the building would vanish from the map. Fall back to the building point.
+test('exportRowToDatasetRow falls back to the point when the contour cannot be repaired', () => {
+  const row = exportRowToDatasetRow({
+    rnb_id: 'S5CAKN8GTZSD',
+    point: 'SRID=4326;POINT(-0.206002947992377 48.89836806844313)',
+    shape: 'SRID=4326;MULTIPOLYGON(((4.03 49.42)))'
+  })
+  assert.equal(row.shape, 'POINT (-0.206003 48.898368)')
+  assert.equal(row.point, '48.898368,-0.206003')
+})
+
 test('diffRowToDatasetRow maps create/update and delete rows', () => {
   assert.deepEqual(diffRowToDatasetRow({
     action: 'update',

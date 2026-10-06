@@ -21,8 +21,13 @@ export type RnbColumn = typeof RNB_COLUMNS[number]
 /** Columns of a `_bulk_lines` payload: the operation, then every dataset column. */
 export const BULK_COLUMNS: string[] = ['_action', ...RNB_COLUMNS]
 
-/** Repair payloads only patch the geometry: the other columns are left untouched. */
-export const PATCH_COLUMNS: string[] = ['_action', 'rnb_id', 'shape']
+/**
+ * Repair payloads only patch the geometry: the other columns are left untouched. `shape` must not
+ * be the last column: data-fair's CSV parser drops trailing empty values, so an empty `shape`
+ * (a geometry that cannot be repaired) would be silently ignored and the line would keep its
+ * broken shape.
+ */
+export const PATCH_COLUMNS: string[] = ['_action', 'shape', 'rnb_id']
 
 /**
  * Schema of the produced dataset. Text indexing is disabled on every raw JSON column: they are

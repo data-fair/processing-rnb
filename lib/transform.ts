@@ -14,6 +14,13 @@ export const ewktPointToLatLon = (value: string): string => {
   return `${round(match[2])},${round(match[1])}`
 }
 
+/**
+ * Contour of a building as WKT, or its point when the polygon cannot be made ES-indexable: a line
+ * without a geo column is invisible on the map, a point keeps it locatable.
+ */
+const shapeOrPoint = (shape: string, point: string): string =>
+  shapeToWkt(shape || '') || shapeToWkt(point || '')
+
 /** Export `addresses` column (full JSON objects) → JSON array of BAN address ids. */
 export const addressesToIds = (value: string): string => {
   if (!value) return '[]'
@@ -53,7 +60,7 @@ export const exportRowToDatasetRow = (row: Record<string, string>): DatasetRow =
   _action: 'createOrUpdate',
   rnb_id: row.rnb_id || '',
   point: ewktPointToLatLon(row.point || ''),
-  shape: shapeToWkt(row.shape || ''),
+  shape: shapeOrPoint(row.shape, row.point),
   status: row.status || '',
   ext_ids: row.ext_ids || '',
   addresses_id: addressesToIds(row.addresses || ''),
@@ -71,7 +78,7 @@ export const diffRowToDatasetRow = (row: Record<string, string>): DatasetRow | n
     _action: 'createOrUpdate',
     rnb_id: row.rnb_id || '',
     point: ewktPointToLatLon(row.point || ''),
-    shape: shapeToWkt(row.shape || ''),
+    shape: shapeOrPoint(row.shape, row.point),
     status: row.status || '',
     ext_ids: row.ext_ids || '',
     addresses_id: row.addresses_id || '[]',

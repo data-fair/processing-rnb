@@ -10,6 +10,7 @@ export interface RnbDataset {
   id: string
   title: string
   extras?: Record<string, any>
+  rest?: { primaryKeyMode?: string }
 }
 
 /** Create the editable dataset that holds the buildings. */

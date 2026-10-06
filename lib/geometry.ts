@@ -1,11 +1,15 @@
 import { wktToGeoJSON, geojsonToWKT } from '@terraformer/wkt'
 import polygonClipping from 'polygon-clipping'
+import sweeplineIntersections from 'sweepline-intersections'
 
 // Coordinates are rounded to ~11 cm: ES' tessellator works at ~1e-6° and the extra decimals only
 // inflate the raw column (stored in `_source`), `_geoshape` and the tiles payloads.
 export const COORD_DECIMALS = 6
 const FACTOR = 10 ** COORD_DECIMALS
 const SRID_RE = /^SRID=\d+;/
+
+// 1.5.x ships an ESM-style d.ts for a UMD build whose module.exports IS the function
+const findIntersections = sweeplineIntersections as unknown as typeof sweeplineIntersections.default
 
 // Above this many points in a polygon the exact O(n²) test is skipped and the geometry is repaired
 // unconditionally. RNB buildings are far below; the rare huge shapes are worth one union.
@@ -200,6 +204,36 @@ const exactGeometryInvalid = (geometry: Geometry): boolean => {
     if (ringIsSuspicious(ring)) return true
   }
   return edgesOverlap(rings)
+}
+
+/** sweepline-intersections, the detector the first releases used before the exact test replaced it. */
+const selfIntersects = (geometry: Geometry): boolean => {
+  try {
+    return findIntersections({ type: 'Feature', geometry, properties: {} }, false).length > 0
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Would the v1.0.2 pipeline have unioned this shape? It trusted sweepline-intersections, which
+ * flags figures the exact test above tolerates (two polygons touching at a vertex, a hole touching
+ * its shell, near-degenerate kinks). The polygon it then stored with polygon-clipping can still be
+ * refused by Elasticsearch ("Unable to Tessellate shape"), and the repair pass, which only runs
+ * the exact test, would leave it untouched. Returns true for those legacy shapes so the repair
+ * pass rewrites them with today's geometry.
+ */
+export const legacyRepairNeeded = (value: string): boolean => {
+  const wkt = (value || '').replace(SRID_RE, '')
+  if (!wkt) return false
+  try {
+    const geometry = wktToGeoJSON(wkt) as Geometry
+    if ((geometry?.type !== 'Polygon' && geometry?.type !== 'MultiPolygon') || !geometry.coordinates) return false
+    const cleaned = cleanGeometry(roundGeometry(geometry))
+    return cleaned ? selfIntersects(cleaned) : false
+  } catch {
+    return false
+  }
 }
 
 /**

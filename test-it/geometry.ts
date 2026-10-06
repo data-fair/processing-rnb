@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { shapeToWkt, shapeToWktDetailed } from '../lib/geometry.ts'
+import { shapeToWkt, shapeToWktDetailed, legacyRepairNeeded } from '../lib/geometry.ts'
 
 // Real RNB building ASKDP3ZF62M3 (Aisne). Rounding its shape to 6 decimals makes two vertices
 // collapse to 3.860652,49.865695: Elasticsearch rejects the line with "Self-intersection at or
@@ -72,4 +72,40 @@ test('shapeToWktDetailed keeps a valid hole', () => {
     wkt: 'POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (2 2, 2 3, 3 3, 3 2, 2 2))',
     repaired: false
   })
+})
+
+// v1.0.2 trusted sweepline-intersections, which flags figures that merely touch at a vertex (two
+// polygons sharing a corner, a hole touching its shell). The exact test tolerates them, so the
+// repair pass would skip the union output v1.0.2 stored: legacyRepairNeeded must flag those lines.
+test('legacyRepairNeeded flags what only the v1.0.2 sweepline detector repaired', () => {
+  const touchingParts = 'MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0)),((1 1,2 1,2 2,1 2,1 1)))'
+  assert.equal(shapeToWktDetailed(touchingParts).repaired, false)
+  assert.equal(legacyRepairNeeded(touchingParts), true)
+
+  const touchingHole = 'POLYGON((0 0,10 0,10 10,0 10,0 0),(0 0,2 1,1 2,0 0))'
+  assert.equal(shapeToWktDetailed(touchingHole).repaired, false)
+  assert.equal(legacyRepairNeeded(touchingHole), true)
+
+  const healthy = 'POLYGON((3.86 49.86,3.861 49.86,3.861 49.861,3.86 49.861,3.86 49.86))'
+  assert.equal(legacyRepairNeeded(healthy), false)
+  assert.equal(legacyRepairNeeded('POINT(3.86 49.86)'), false)
+})
+
+// Shapes stored by v1.0.2 for RNB S5CAKN8GTZSD (Falaise): polygon-clipping output whose second
+// polygon is a 3e-6-degree degenerate triangle. Elasticsearch 9.0 refuses it ("Unable to Tessellate
+// shape"), the repair pass must turn it back into the single valid polygon.
+test('shapeToWktDetailed repairs the legacy union output of RNB S5CAKN8GTZSD', () => {
+  const result = shapeToWktDetailed('MULTIPOLYGON (((-0.206076 48.89837, -0.206042 48.898327, -0.205927 48.898366, -0.205929 48.898365, -0.205947 48.898388, -0.205963 48.898408, -0.206076 48.89837)), ((-0.205927 48.898366, -0.205924 48.898366, -0.205925 48.898366, -0.205927 48.898366)))')
+  assert.equal(result.repaired, true)
+  assert.equal(result.wkt, 'POLYGON ((-0.206076 48.89837, -0.206042 48.898327, -0.205929 48.898365, -0.205947 48.898388, -0.205963 48.898408, -0.206076 48.89837))')
+})
+
+// Shapes stored by v1.0.2 for RNB 9J52TY1ENSWP (Alsace): the sweepline detector unioned a
+// near-degenerate kink the exact test tolerates, leaving the main polygon plus a 1e-6-degree
+// triangle. The resulting multipolygon is refused by Elasticsearch, the repair pass must drop the
+// residual kink.
+test('shapeToWktDetailed repairs the legacy union output of RNB 9J52TY1ENSWP', () => {
+  const result = shapeToWktDetailed('MULTIPOLYGON (((7.917987 48.899459, 7.918013 48.899452, 7.918002 48.899431, 7.918062 48.899415, 7.918052 48.899396, 7.918045 48.899384, 7.918127 48.899366, 7.918114 48.899341, 7.918128 48.899366, 7.918178 48.899455, 7.918177 48.899453, 7.918152 48.89946, 7.918214 48.899565, 7.918154 48.899578, 7.918067 48.899597, 7.917987 48.899459)), ((7.918178 48.899455, 7.91818 48.899457, 7.918179 48.899456, 7.918178 48.899455)))')
+  assert.equal(result.repaired, true)
+  assert.equal(result.wkt, 'POLYGON ((7.917987 48.899459, 7.918013 48.899452, 7.918002 48.899431, 7.918062 48.899415, 7.918052 48.899396, 7.918045 48.899384, 7.918127 48.899366, 7.918114 48.899341, 7.918128 48.899366, 7.918177 48.899453, 7.918152 48.89946, 7.918214 48.899565, 7.918154 48.899578, 7.918067 48.899597, 7.917987 48.899459))')
 })
