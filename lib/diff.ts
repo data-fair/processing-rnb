@@ -9,6 +9,17 @@ import { BATCH_SIZE, RNB_API_URL, isStopped } from './utils.ts'
 const DAY_MS = 24 * 3600 * 1000
 
 /**
+ * Upper bound of the diff, read from its file name (`diff_<since>_<end>.csv`): the last modification
+ * the API knows, which lags behind the request time. Null when the header is absent or unreadable.
+ */
+export const diffEndBound = (contentDisposition: string | undefined): string | null => {
+  const match = /diff_[^"]*_([^_"]+)\.csv/.exec(contentDisposition || '')
+  if (!match) return null
+  const date = new Date(match[1])
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+/**
  * Nightly sync: fetch the RNB diff since the last applied modification and upsert/delete the
  * matching lines. The diff CSV already carries every column of the dataset, so no per-building
  * detail call is needed.
@@ -26,7 +37,6 @@ export const runDiff = async (context: ProcessingContext<ProcessingConfig>): Pro
     return
   }
 
-  const requestStart = new Date().toISOString()
   const since = typeof dataset.extras?.rnbLastSync === 'string' && dataset.extras.rnbLastSync
     ? dataset.extras.rnbLastSync
     : new Date(Date.now() - DAY_MS).toISOString()
@@ -43,6 +53,10 @@ export const runDiff = async (context: ProcessingContext<ProcessingConfig>): Pro
     }
     throw err
   })
+  // an empty diff moves the sync date to the API's bound, never to the request time: a modification
+  // the API publishes later with an earlier timestamp would be skipped
+  const endBound = diffEndBound(response.headers?.['content-disposition'])
+  const noChangeSync = endBound && new Date(endBound) > new Date(since) ? endBound : since
   const parser = response.data.pipe(parse({ columns: true, delimiter: ',', quote: '"', relax_column_count: true, skip_empty_lines: true }))
   response.data.on('error', (err: Error) => parser.destroy(err))
 
@@ -63,12 +77,14 @@ export const runDiff = async (context: ProcessingContext<ProcessingConfig>): Pro
 
   const rows = [...byId.values()]
   if (!rows.length) {
-    await patchExtras(axios, dataset, { rnbLastSync: requestStart }, log)
+    await patchExtras(axios, dataset, { rnbLastSync: noChangeSync }, log)
     await log.info('Aucune modification à appliquer')
     return
   }
 
   let total = 0
+  let missing = 0
+  let rejected = 0
   let lastSync = ''
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     if (isStopped()) {
@@ -76,7 +92,10 @@ export const runDiff = async (context: ProcessingContext<ProcessingConfig>): Pro
       return
     }
     const batch = rows.slice(i, i + BATCH_SIZE)
-    await pushRows(axios, dataset.id, batch, log)
+    // a missing or rejected line is logged by pushRows and must not block the sync: the date moves on
+    const result = await pushRows(axios, dataset.id, batch, log)
+    missing += result.missing
+    rejected += result.rejected
     total += batch.length
     const timestamps = batch.map(row => row.modified_at).filter(Boolean).sort() as string[]
     if (timestamps.length) {
@@ -87,6 +106,6 @@ export const runDiff = async (context: ProcessingContext<ProcessingConfig>): Pro
     await log.progress('Modifications appliquées', total, rows.length)
   }
 
-  if (!lastSync) await patchExtras(axios, dataset, { rnbLastSync: requestStart }, log)
-  await log.info(`${total} bâtiments mis à jour (créations, modifications et suppressions)`)
+  if (!lastSync) await patchExtras(axios, dataset, { rnbLastSync: noChangeSync }, log)
+  await log.info(`${total} bâtiments mis à jour (créations, modifications et suppressions)${missing ? `, ${missing} déjà absent(s)` : ''}${rejected ? `, ${rejected} rejeté(s) par data-fair` : ''}`)
 }

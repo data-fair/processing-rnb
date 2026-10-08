@@ -15,6 +15,10 @@ const findIntersections = sweeplineIntersections as unknown as typeof sweeplineI
 // unconditionally. RNB buildings are far below; the rare huge shapes are worth one union.
 const EXACT_CHECK_MAX_POINTS = 1000
 
+// The check of the union output stays exact up to this size (~0.7 s); above it, a seconds-long
+// O(n²) test per shape is traded for sweepline-intersections, which may only over-report.
+const FINAL_EXACT_CHECK_MAX_POINTS = 5000
+
 type Position = number[]
 interface Geometry { type: string, coordinates?: any }
 
@@ -93,7 +97,7 @@ const cleanGeometry = (geometry: Geometry): Geometry | null => {
     return coordinates ? { type: 'Polygon', coordinates } : null
   }
   if (geometry.type === 'MultiPolygon') {
-    const polygons = geometry.coordinates
+    const polygons = (geometry.coordinates as Position[][][])
       .map(cleanPolygon)
       .filter((polygon): polygon is Position[][] => polygon !== null)
     if (!polygons.length) return null
@@ -215,6 +219,12 @@ const selfIntersects = (geometry: Geometry): boolean => {
   }
 }
 
+/** Validity of the union output: exact when affordable, conservative (over-reporting) above. */
+const finalGeometryInvalid = (geometry: Geometry): boolean =>
+  countPoints(geometry) > FINAL_EXACT_CHECK_MAX_POINTS
+    ? polygonRings(geometry).some(ringIsSuspicious) || selfIntersects(geometry)
+    : exactGeometryInvalid(geometry)
+
 /**
  * Would the v1.0.2 pipeline have unioned this shape? It trusted sweepline-intersections, which
  * flags figures the exact test above tolerates (two polygons touching at a vertex, a hole touching
@@ -323,7 +333,7 @@ export const shapeToWktDetailed = (value: string): ShapeResult => {
     const final = cleanGeometry(roundGeometry(repaired))
     // never emit a geometry the exact test (or data-fair's cleanCoords) could still degrade:
     // the line is better indexed without a geoshape than rejected
-    if (!final || exactGeometryInvalid(final)) return { wkt: '', repaired: true }
+    if (!final || finalGeometryInvalid(final)) return { wkt: '', repaired: true }
     return { wkt: geojsonToWKT(final as any), repaired: true }
   } catch {
     return { wkt: '', repaired: true }

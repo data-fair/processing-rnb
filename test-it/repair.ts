@@ -13,25 +13,51 @@ const log = () => ({
   progress: async () => {}
 })
 
-// A journal without an indexing error ("Ligne <_i>") must short-circuit before the export scan,
-// which is the whole point of reading it first.
-test('runRepair does not scan the export when the journal has no indexing error', async () => {
+const repairContext = (journal: any[], extras: Record<string, any> = {}) => {
   const calls: string[] = []
+  const patches: any[] = []
+  const configs: any[] = []
   const axios = {
     get: async (url: string) => {
       calls.push(url)
-      if (url.endsWith('/journal')) {
-        return { data: [{ type: 'error', data: 'indexation refusée par elasticsearch pour 1 ligne(s) : boom' }] }
-      }
-      return { data: { id: 'ds1', title: 'Bâtiments RNB' } }
+      if (url.endsWith('/journal')) return { data: journal }
+      return { data: { id: 'ds1', title: 'Bâtiments RNB', extras } }
+    },
+    patch: async (url: string, body: any) => {
+      patches.push(body)
+      return { data: {} }
     }
   }
-  await runRepair({
+  const context = {
     processingConfig: { datasetMode: 'repair', dataset: { id: 'ds1' } },
     log: log(),
-    axios
-  } as any)
+    axios,
+    patchConfig: async (patch: any) => { configs.push(patch) }
+  }
+  return { context: context as any, calls, patches, configs }
+}
+
+// A journal without an indexing error ("Ligne <_i>") must short-circuit before the export scan,
+// which is the whole point of reading it first. The processing then goes back to update mode: left
+// in repair mode, a scheduled processing would stop applying the nightly diff.
+test('runRepair does not scan the export when the journal has no indexing error', async () => {
+  const { context, calls, patches, configs } = repairContext([{ type: 'error', data: 'indexation refusée par elasticsearch pour 1 ligne(s) : boom' }])
+  await runRepair(context)
   assert.deepEqual(calls, ['api/v1/datasets/ds1', 'api/v1/datasets/ds1/journal'])
+  assert.deepEqual(configs, [{ datasetMode: 'update', dataset: { id: 'ds1', title: 'Bâtiments RNB' } }])
+  assert.equal(typeof patches[0].extras.rnbLastRepair, 'string')
+})
+
+// The journal keeps its last indexing error forever: once a repair has run, the errors logged
+// before it must not trigger another 12 GB export scan.
+test('runRepair ignores the journal errors older than the last repair', async () => {
+  const { context, calls, configs } = repairContext([
+    { type: 'finalize-end', date: '2026-10-07T10:00:00.000Z' },
+    { type: 'error', date: '2026-10-06T09:00:00.000Z', data: ' - Ligne 1: Polygon self-intersection at lat=48.5 lon=1.38' }
+  ], { rnbLastRepair: '2026-10-06T12:00:00.000Z' })
+  await runRepair(context)
+  assert.deepEqual(calls, ['api/v1/datasets/ds1', 'api/v1/datasets/ds1/journal'])
+  assert.equal(configs[0].datasetMode, 'update')
 })
 
 // A contour that cannot be repaired falls back to the building point: an empty `shape` patch is
@@ -74,11 +100,14 @@ test('parseErroredLines reads the _i and the first coordinate of each error', ()
   assert.deepEqual(parseErroredLines([
     ' - Ligne 308280081630: Unable to Tessellate shape [[48.898366, -0.205925] [48.89...[48.898366, -0.205925] ]. Possible malformed shape detected.',
     ' - Ligne 646054052951: Unable to Tessellate shape [[48.595581, 1.38452] [48.5956...] [48.595581, 1.38452] ]. Possible malformed shape detected.',
-    ' - Ligne 1: Polygon self-intersection at lat=48.5 lon=1.38'
+    ' - Ligne 1: Polygon self-intersection at lat=48.5 lon=1.38',
+    // production journal of 2026-10-06: this message is in [lon,lat] order
+    ' - Ligne 12: Self-intersection at or near point [3.860652,49.865695]'
   ].join('\n')), [
     { i: 308280081630, at: [48.898366, -0.205925] },
     { i: 646054052951, at: [48.595581, 1.38452] },
-    { i: 1, at: [48.5, 1.38] }
+    { i: 1, at: [48.5, 1.38] },
+    { i: 12, at: [49.865695, 3.860652] }
   ])
 
   assert.deepEqual(parseErroredLines('indexation refusée par elasticsearch pour 1 ligne(s) : boom'), [])

@@ -21,13 +21,16 @@ export const ewktPointToLatLon = (value: string): string => {
 const shapeOrPoint = (shape: string, point: string): string =>
   shapeToWkt(shape || '') || shapeToWkt(point || '')
 
-/** Export `addresses` column (full JSON objects) → JSON array of BAN address ids. */
+/**
+ * Export `addresses` column (full JSON objects keyed by `cle_interop_ban`) → JSON array of address
+ * ids, the format of the diff `addresses_id` column. `id` is kept as a fallback for the API format.
+ */
 export const addressesToIds = (value: string): string => {
   if (!value) return '[]'
   try {
     const addresses = JSON.parse(value)
     if (!Array.isArray(addresses)) return '[]'
-    return JSON.stringify(addresses.map(address => address?.id).filter(Boolean))
+    return JSON.stringify(addresses.map(address => address?.cle_interop_ban ?? address?.id).filter(Boolean))
   } catch {
     return '[]'
   }

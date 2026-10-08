@@ -57,9 +57,12 @@ test('shapeToWkt makes a kinked RNB polygon ES-indexable', () => {
   assert.equal(shapeToWkt(kinked), 'POLYGON ((4.893202 47.186351, 4.893181 47.186363, 4.893126 47.186319, 4.893087 47.186346, 4.89314 47.186387, 4.893202 47.186351))')
 })
 
-test('addressesToIds keeps only the BAN ids', () => {
-  const addresses = '[{"id": "72280_0175_00003", "street": "Rue A"}, {"id": "72280_0175_00004"}]'
-  assert.equal(addressesToIds(addresses), '["72280_0175_00003","72280_0175_00004"]')
+test('addressesToIds keeps only the address ids', () => {
+  // national export format: the id is in `cle_interop_ban`
+  const addresses = '[{"cle_interop_ban" : "IMB/01053/C/003B", "street_number" : "374"}, {"cle_interop_ban" : "01053_0750_00374", "street_rep" : null}]'
+  assert.equal(addressesToIds(addresses), '["IMB/01053/C/003B","01053_0750_00374"]')
+  // API format
+  assert.equal(addressesToIds('[{"id": "72280_0175_00003", "street": "Rue A"}]'), '["72280_0175_00003"]')
   assert.equal(addressesToIds('[]'), '[]')
   assert.equal(addressesToIds(''), '[]')
   assert.equal(addressesToIds('not json'), '[]')
@@ -79,25 +82,26 @@ test('actionToBulkAction maps the diff actions', () => {
   assert.equal(actionToBulkAction('merge'), null)
 })
 
+// Real line of RNB_nat.csv (export of 2026-10-04), as parsed from the `;` separated file.
 test('exportRowToDatasetRow builds a full row from the national export', () => {
   const row = exportRowToDatasetRow({
-    rnb_id: 'ZPAXN7C4DPJE',
-    point: 'SRID=4326;POINT(4.033645854904865 49.42990814620328)',
-    shape: 'SRID=4326;MULTIPOLYGON(((4.03 49.42,4.04 49.42,4.04 49.43,4.03 49.43,4.03 49.42)))',
+    rnb_id: 'DT73MF7NDE8M',
+    point: 'SRID=4326;POINT(5.215758632846468 46.21084685132588)',
+    shape: 'SRID=4326;MULTIPOLYGON(((5.21583483950653 46.21081834421106,5.215799145120098 46.21089831345784,5.215682731639923 46.21087535844071,5.21571835339785 46.21079358897399,5.21583483950653 46.21081834421106)))',
     status: 'constructed',
-    ext_ids: '[{"id": "bdnb-bc-JQP9-7Y45-2XUR", "source": "bdnb"}]',
-    addresses: '[{"id": "025410000B0348", "bdg_cover_ratio": 0.05}]',
-    plots: '[{"id": "025410000B0348", "bdg_cover_ratio": 0.05}]',
+    ext_ids: '[{"id": "bdnb-bc-ACWM-JRV4-SY85", "source": "bdnb", "created_at": "2023-12-07T13:13:05.783459+00:00", "source_version": "2023_01"}]',
+    addresses: '[{"cle_interop_ban" : "IMB/01053/C/003B", "street_number" : "374", "street_rep" : "", "street" : "rue de la chambiere", "city_zipcode" : "", "city_name" : "Bourg-en-Bresse"}, {"cle_interop_ban" : "01053_0750_00374", "street_number" : "374", "street_rep" : null, "street" : "rue de la chambière", "city_zipcode" : "01000", "city_name" : "Bourg-en-Bresse"}]',
+    plots: '[{"id" : "01053000AB0301", "bdg_cover_ratio" : 0.9999497286428998}]',
     validated_by: '[]'
   })
   assert.deepEqual(row, {
     _action: 'createOrUpdate',
-    rnb_id: 'ZPAXN7C4DPJE',
-    point: '49.429908,4.033646',
-    shape: 'POLYGON ((4.03 49.42, 4.04 49.42, 4.04 49.43, 4.03 49.43, 4.03 49.42))',
+    rnb_id: 'DT73MF7NDE8M',
+    point: '46.210847,5.215759',
+    shape: 'POLYGON ((5.215835 46.210818, 5.215799 46.210898, 5.215683 46.210875, 5.215718 46.210794, 5.215835 46.210818))',
     status: 'constructed',
-    ext_ids: '[{"id": "bdnb-bc-JQP9-7Y45-2XUR", "source": "bdnb"}]',
-    addresses_id: '["025410000B0348"]',
+    ext_ids: '[{"id": "bdnb-bc-ACWM-JRV4-SY85", "source": "bdnb", "created_at": "2023-12-07T13:13:05.783459+00:00", "source_version": "2023_01"}]',
+    addresses_id: '["IMB/01053/C/003B","01053_0750_00374"]',
     validated_by: '[]',
     modified_at: ''
   })

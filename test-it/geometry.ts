@@ -109,3 +109,18 @@ test('shapeToWktDetailed repairs the legacy union output of RNB 9J52TY1ENSWP', (
   assert.equal(result.repaired, true)
   assert.equal(result.wkt, 'POLYGON ((7.917987 48.899459, 7.918013 48.899452, 7.918002 48.899431, 7.918062 48.899415, 7.918052 48.899396, 7.918045 48.899384, 7.918127 48.899366, 7.918114 48.899341, 7.918128 48.899366, 7.918177 48.899453, 7.918152 48.89946, 7.918214 48.899565, 7.918154 48.899578, 7.918067 48.899597, 7.917987 48.899459))')
 })
+
+// The exact O(n²) check of the union output took ~10 s on a 20 000-point shape: above
+// FINAL_EXACT_CHECK_MAX_POINTS it is replaced by sweepline-intersections, and the shape is kept.
+test('shapeToWktDetailed keeps a huge valid shape without the O(n²) check', () => {
+  const points: string[] = []
+  for (let i = 0; i < 20000; i++) {
+    const angle = 2 * Math.PI * i / 20000
+    points.push(`${(2 + 0.01 * Math.cos(angle)).toFixed(7)} ${(48 + 0.01 * Math.sin(angle)).toFixed(7)}`)
+  }
+  points.push(points[0])
+  const start = Date.now()
+  const result = shapeToWktDetailed(`POLYGON((${points.join(',')}))`)
+  assert.match(result.wkt, /^POLYGON \(\(/)
+  assert.ok(Date.now() - start < 5000, `took ${Date.now() - start} ms`)
+})

@@ -9,6 +9,12 @@ export const DEFAULT_SOURCE_URL = 'https://rnb-opendata.s3.fr-par.scw.cloud/file
 /** Name of the CSV entry inside the national export archive. */
 export const EXPORT_ENTRY_NAME = 'RNB_nat.csv'
 
+/**
+ * The diff following a full import restarts this long before the export publication date: the
+ * export is a database snapshot taken some time before it is published.
+ */
+export const EXPORT_SYNC_MARGIN_MS = 2 * 24 * 3600 * 1000
+
 /** Lines pushed in one `_bulk_lines` request. Keeps each body around a few MB before gzip. */
 export const BATCH_SIZE = 10000
 

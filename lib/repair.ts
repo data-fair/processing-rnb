@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { AxiosInstance } from 'axios'
 import type { ProcessingContext, LogFunctions } from '@data-fair/lib-common-types/processings.js'
 import type { ProcessingConfig } from '#types/processingConfig/index.ts'
-import { getDataset, pushRows, type RnbDataset } from './datasets.ts'
+import { getDataset, patchExtras, pushRows, type RnbDataset } from './datasets.ts'
 import { openExportParser } from './full-import.ts'
 import { legacyRepairNeeded, shapeToWkt, shapeToWktDetailed } from './geometry.ts'
 import { PATCH_COLUMNS } from './schemas.ts'
@@ -19,25 +19,35 @@ import {
 interface ErroredLine {
   /** data-fair line index (`_i`), the only handle the journal gives. */
   i: number
-  /** First coordinate of the refused shape (`[lat, lon]`), when the ES message carries the polygon. */
+  /** First coordinate of the refused shape (`[lat, lon]`), when the ES message carries one. */
   at?: [number, number]
 }
 
 /** Patched contours logged at the end of the run, to identify a line that would still be rejected. */
 const PATCH_LOG_SAMPLE = 20
 
+const NUM = '(-?\\d+(?:\\.\\d+)?)'
+// "Self-intersection at or near point [lon,lat]" (x,y order)
+const NEAR_POINT_RE = new RegExp(`at or near point \\[${NUM},\\s*${NUM}\\]`)
+// "Unable to Tessellate shape [[lat, lon] ..." (Lucene polygon order)
+const POLYGON_RE = new RegExp(`\\[\\[${NUM},\\s*${NUM}\\]`)
+const LAT_LON_RE = new RegExp(`lat=${NUM}\\s+lon=${NUM}`)
+
 export const parseErroredLines = (data: string): ErroredLine[] => {
   const lines: ErroredLine[] = []
   for (const row of data.split('\n')) {
     const index = /Ligne (\d+)/.exec(row)
     if (!index) continue
-    const polygon = /\[\[?(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\]/.exec(row)
-    const point = /lat=(-?\d+(?:\.\d+)?)\s+lon=(-?\d+(?:\.\d+)?)/.exec(row)
-    const at = polygon
-      ? [Number(polygon[1]), Number(polygon[2])] as [number, number]
-      : point
-        ? [Number(point[1]), Number(point[2])] as [number, number]
-        : undefined
+    const nearPoint = NEAR_POINT_RE.exec(row)
+    const polygon = POLYGON_RE.exec(row)
+    const point = LAT_LON_RE.exec(row)
+    const at = nearPoint
+      ? [Number(nearPoint[2]), Number(nearPoint[1])] as [number, number]
+      : polygon
+        ? [Number(polygon[1]), Number(polygon[2])] as [number, number]
+        : point
+          ? [Number(point[1]), Number(point[2])] as [number, number]
+          : undefined
     lines.push({ i: Number(index[1]), at })
   }
   return lines
@@ -45,16 +55,21 @@ export const parseErroredLines = (data: string): ErroredLine[] => {
 
 /**
  * The journal's last indexing error lists up to 3 lines as "Ligne <_i>: <reason>" (data-fair's
- * errorsSummary). Returns null when the journal cannot be read, so the caller scans the export.
+ * errorsSummary). Events older than `after` (the start of the last completed repair) were already
+ * handled and are ignored. Returns null when the journal cannot be read, so the caller scans the
+ * export.
  */
 const readErroredLines = async (
   axios: AxiosInstance,
   datasetId: string,
-  log: LogFunctions
+  log: LogFunctions,
+  after?: string
 ): Promise<{ lines: ErroredLine[], date?: string } | null> => {
   try {
     const events = (await axios.get(`api/v1/datasets/${datasetId}/journal`)).data as any[]
+    // the journal is sorted from the newest event
     for (const event of events ?? []) {
+      if (after && typeof event?.date === 'string' && new Date(event.date) <= new Date(after)) break
       if (event?.type !== 'error' || typeof event.data !== 'string') continue
       const lines = parseErroredLines(event.data)
       if (lines.length) {
@@ -132,7 +147,7 @@ export const repairErroredLines = async (
       await log.info(`Ligne ${entry.i} : contour stocké de ${building.rnb_id} réécrit (${wkt})`)
     }
   }
-  if (rows.length) await pushRows(axios, dataset.id, rows, log, { columns: PATCH_COLUMNS, allowMissing: true })
+  if (rows.length) await pushRows(axios, dataset.id, rows, log, { columns: PATCH_COLUMNS })
   return patched
 }
 
@@ -158,18 +173,30 @@ export const repairRow = (record: Record<string, string>): DatasetRow | null => 
  * ring, escaped hole) or that the v1.0.2 sweepline detector unioned into a shape Elasticsearch can
  * still refuse. A building whose contour cannot be repaired falls back to its point, never an empty
  * shape. Nothing else is written (no `drop`, no full dataset rewrite), so the dataset is repaired
- * in place.
+ * in place. A completed repair switches the processing back to update mode: left in repair mode, a
+ * scheduled processing would silently stop applying the nightly diff.
  */
 export const runRepair = async (context: ProcessingContext<ProcessingConfig>): Promise<void> => {
-  const { processingConfig, log, axios } = context
+  const { processingConfig, log, axios, patchConfig } = context
+  const startedAt = new Date().toISOString()
   const datasetId = processingConfig.datasetMode === 'repair' ? processingConfig.dataset?.id : undefined
   if (!datasetId) throw new Error('Jeu de données à réparer manquant.')
 
   await log.step('Lecture du jeu de données')
   const dataset = await getDataset(axios, datasetId)
-  const errored = await readErroredLines(axios, dataset.id, log)
+
+  const finish = async (): Promise<void> => {
+    // the journal errors older than this run are handled: the next repair ignores them
+    await patchExtras(axios, dataset, { rnbLastRepair: startedAt }, log)
+    await patchConfig({ datasetMode: 'update', dataset: { id: dataset.id, title: dataset.title } })
+    await log.info('Le traitement repasse en mode mise à jour : la prochaine exécution appliquera le différentiel')
+  }
+
+  const lastRepair = typeof dataset.extras?.rnbLastRepair === 'string' ? dataset.extras.rnbLastRepair : undefined
+  const errored = await readErroredLines(axios, dataset.id, log, lastRepair)
   if (errored && !errored.lines.length) {
-    await log.info(`Aucune ligne en erreur d'indexation dans le journal de « ${dataset.title} », rien à réparer`)
+    await log.info(`Aucune nouvelle ligne en erreur d'indexation dans le journal de « ${dataset.title} », rien à réparer`)
+    await finish()
     return
   }
   if (errored) {
@@ -194,7 +221,7 @@ export const runRepair = async (context: ProcessingContext<ProcessingConfig>): P
 
   const flush = async (): Promise<void> => {
     if (!batch.length) return
-    missing += await pushRows(axios, dataset.id, batch, log, { columns: PATCH_COLUMNS, allowMissing: true })
+    missing += (await pushRows(axios, dataset.id, batch, log, { columns: PATCH_COLUMNS })).missing
     repaired += batch.length
     batch = []
   }
@@ -227,4 +254,5 @@ export const runRepair = async (context: ProcessingContext<ProcessingConfig>): P
   if (scanned) await log.progress('Bâtiments analysés', scanned, scanned)
   await log.info(`${repaired} bâtiment(s) corrigé(s) sur ${scanned} analysés dans « ${dataset.title} » (${dataset.id})${missing ? `, ${missing} absent(s) du jeu de données` : ''}`)
   if (patchedSample.length) await log.info(`Contours réécrits (extrait) :\n${patchedSample.join('\n')}`)
+  await finish()
 }

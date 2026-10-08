@@ -12,7 +12,9 @@ Colonnes produites : `rnb_id`, `point`, `shape`, `status`, `ext_ids`, `addresses
 
 Les contours sont arrondis à 6 décimales puis validés (sommets dupliqués, auto-intersections) et réparés par `polygon-clipping` avant indexation, afin qu'Elasticsearch n'ait jamais à rejeter une ligne pour une géométrie invalide. Les anneaux dégénérés ou négligeables et les trous sortis de leur coque sont supprimés ; en mode réparation, les lignes dont la `shape` stockée (non arrondie, des premières versions) n'est pas indexable telle quelle sont réécrites, y compris celles que l'ancien détecteur `sweepline-intersections` avait unionnées à tort. Un contour définitivement irréparable est remplacé par le point du bâtiment : une ligne sans géométrie disparaît de la carte, un point la garde localisable.
 
-Si un import complet est interrompu, le prochain lancement le reprend automatiquement (les lignes partielles sont remplacées).
+Si un import complet est interrompu, le prochain lancement le reprend automatiquement : sur la même archive (même ETag), les lignes déjà importées sont relues sans être renvoyées ; sur une archive différente, les lignes partielles sont remplacées (`drop`). À la fin de l'import, le différentiel repart deux jours avant la date de publication de l'export (`Last-Modified`), l'export étant un instantané antérieur à sa publication.
+
+Une ligne absente du jeu de données lors d'une suppression (différentiel rejoué) est considérée comme déjà appliquée ; une ligne rejetée par data-fair est journalisée et ignorée, sans bloquer la synchronisation. Une réparation terminée repasse le traitement en mode mise à jour.
 
 ## Développement
 
